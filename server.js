@@ -4,6 +4,8 @@ var express = require('express');
 var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
+var _ = require('underscore');
+var db = require('./db.js');
 
 app.use(express.static(__dirname + '/public'));
 
@@ -28,6 +30,20 @@ function sendCurrentUsers(socket) {
 		name: 'System',
 		text: 'Current users: ' + users.join(', '),
 		timestamp: moment().valueOf()
+	})
+}
+
+function newSale(socket) {
+	var info = clientInfo[socket.id];
+
+	if (typeof info === 'undefined') {
+		return;
+	}
+
+	db.salesDetail.destroy({
+		where: {
+			name: info.name
+		}
 	})
 }
 
@@ -63,11 +79,68 @@ io.on('connection', function(socket) {
 
 		if (message.text === '@currentUsers') {
 			sendCurrentUsers(socket);
+		} else if (message.text === '@newSale') {
+			newSale(socket);
+			io.to(clientInfo[socket.id].room).emit('command', message);
 		} else {
 			message.timestamp = moment().valueOf();
 			io.to(clientInfo[socket.id].room).emit('message', message);
 		}
 	});
+
+	socket.on('salesDetail', function(sd) {
+		var body = _.pick(sd, 'name', 'plu', 'description','qty', 'amount', 'discount', 'line_total', 'taxable')
+
+		io.to(clientInfo[socket.id].room).emit('salesDetail', sd);
+		
+
+		db.salesDetail.create(body).then(function (salesDetail) {
+			
+		});
+	});
+
+	socket.on('insertPO', function(pos) {
+		var body = _.pick(pos, 'name', 'PoID')
+
+		io.to(clientInfo[socket.id].room).emit('insertPO', pos);
+		
+	});
+
+	socket.on('poStatus', function(pos) {
+		var body = _.pick(pos, 'name', 'PoID', 'Status')
+
+		io.to(clientInfo[socket.id].room).emit('poStatus', pos);
+		
+	});
+
+	socket.on('scaleInventory', function(si) {
+		var body = _.pick(si, 
+			'ProductID', 
+			'ProductItemID', 
+			'Qty',
+			'Barcode',
+			'PackageDate',
+			'SellByDate',
+			'NetWeight',
+			'Volume',
+			'Cost',
+			'UnitPrice',
+			'TotalPrice',
+			'ScaleID',
+			'UserID',
+			'ModifiedDate')
+
+		io.to(clientInfo[socket.id].room).emit('scaleInventory', si);
+		
+	});
+
+	socket.on('sandwichOrder', function(so) {
+		io.to(clientInfo[socket.id].room).emit('sandwichOrder', so);
+	});
+
+	socket.on('command', function(cmd) {
+		io.to(clientInfo[socket.id].room).emit('command', cmd);
+	})
 
 	socket.emit('message', {
 		name: 'System',
@@ -76,6 +149,10 @@ io.on('connection', function(socket) {
 	});
 });
 
-http.listen(PORT, function() {
-	console.log('Server started!')
+db.sequelize.sync({
+	// force: true
+}).then(function() {
+	http.listen(PORT, function() {
+		console.log('Server started!')
+	});
 });
